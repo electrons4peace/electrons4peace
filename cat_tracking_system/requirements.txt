@@ -1,0 +1,20 @@
+# Core dependencies
+numpy>=1.20.0
+opencv-python>=4.5.0
+pyyaml>=6.0
+
+# YOLO for object detection
+ultralytics>=8.0.0
+
+# Web dashboard
+flask>=2.0.0
+
+# Testing and development
+pytest>=7.0.0
+pillow>=9.0.0
+
+# For scheduling
+schedule>=1.1.0
+
+# Optional - Hailo-A SDK (install from Hailo package)
+# hailo-ai>=4.12.0
