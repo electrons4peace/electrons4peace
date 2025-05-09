@@ -60,19 +60,19 @@ def test_camera(preview_time=5, resolution=None, output_file=None, info=False):
     picam2.start()
     print(f"Camera started with resolution: {config['main']['size']}")
     
-    # Show preview if requested
+    # Capture image without preview (to avoid event loop issues)
+    print(f"Capturing image and saving to {output_file}...")
+    
+    # Allow camera to settle with auto exposure and white balance
     if preview_time > 0:
-        print(f"Showing preview for {preview_time} seconds...")
-        picam2.start_preview(Preview.QTGL)
+        print(f"Allowing camera to adjust for {preview_time} seconds...")
         time.sleep(preview_time)
     
-    # Capture image
-    print(f"Capturing image and saving to {output_file}...")
+    # Capture the image
     picam2.capture_file(output_file)
     print("Image captured successfully!")
     
     # Stop camera
-    picam2.stop_preview()
     picam2.stop()
     picam2.close()
     
