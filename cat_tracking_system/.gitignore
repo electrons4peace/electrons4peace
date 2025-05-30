@@ -1,0 +1,2 @@
+cat_tracking_system/yolo_models/*.weights
+*.weights
