@@ -1,0 +1,235 @@
+{
+  "model": "imx708_noir",
+  "location": 2,
+  "capabilities": [],
+  "rotation": 180,
+  "raw_formats": [],
+  "configurations": [],
+  "controls": {
+    "CnnEnableInputTensor": [
+      false,
+      true,
+      false
+    ],
+    "AfWindows": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "FrameDurationLimits": [
+      33333,
+      120000,
+      33333
+    ],
+    "ScalerCrop": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "NoiseReductionMode": [
+      0,
+      4,
+      0
+    ],
+    "Sharpness": [
+      0.0,
+      16.0,
+      1.0
+    ],
+    "AeEnable": [
+      false,
+      true,
+      true
+    ],
+    "AeExposureMode": [
+      0,
+      3,
+      0
+    ],
+    "AfSpeed": [
+      0,
+      1,
+      0
+    ],
+    "AfRange": [
+      0,
+      2,
+      0
+    ],
+    "AfMode": [
+      0,
+      2,
+      0
+    ],
+    "Saturation": [
+      0.0,
+      32.0,
+      1.0
+    ],
+    "ColourTemperature": [
+      100,
+      100000,
+      null
+    ],
+    "Contrast": [
+      0.0,
+      32.0,
+      1.0
+    ],
+    "LensPosition": [
+      0.0,
+      32.0,
+      1.0
+    ],
+    "AfTrigger": [
+      0,
+      1,
+      0
+    ],
+    "ScalerCrops": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "AwbMode": [
+      0,
+      7,
+      0
+    ],
+    "ColourGains": [
+      0.0,
+      32.0,
+      null
+    ],
+    "AwbEnable": [
+      false,
+      true,
+      null
+    ],
+    "AeConstraintMode": [
+      0,
+      3,
+      0
+    ],
+    "ExposureTimeMode": [
+      0,
+      1,
+      0
+    ],
+    "HdrMode": [
+      0,
+      4,
+      0
+    ],
+    "AfMetering": [
+      0,
+      1,
+      0
+    ],
+    "AeMeteringMode": [
+      0,
+      3,
+      0
+    ],
+    "AeFlickerPeriod": [
+      100,
+      1000000,
+      null
+    ],
+    "AfPause": [
+      0,
+      2,
+      0
+    ],
+    "AnalogueGainMode": [
+      0,
+      1,
+      0
+    ],
+    "AnalogueGain": [
+      1.0,
+      16.0,
+      1.0
+    ],
+    "StatsOutputEnable": [
+      false,
+      true,
+      false
+    ],
+    "Brightness": [
+      -1.0,
+      1.0,
+      0.0
+    ],
+    "SyncFrames": [
+      1,
+      1000000,
+      100
+    ],
+    "ExposureTime": [
+      1,
+      66666,
+      20000
+    ],
+    "AeFlickerMode": [
+      0,
+      1,
+      0
+    ],
+    "SyncMode": [
+      0,
+      2,
+      0
+    ],
+    "ExposureValue": [
+      -8.0,
+      8.0,
+      0.0
+    ]
+  }
+}
