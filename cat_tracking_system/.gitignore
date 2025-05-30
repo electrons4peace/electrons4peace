@@ -1,2 +1,4 @@
 cat_tracking_system/yolo_models/*.weights
 *.weights
+*.weights
+yolo_models/*.weights
