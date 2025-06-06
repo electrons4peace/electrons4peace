@@ -127,17 +127,32 @@ class CatROIDetector:
     def init_haar_cascade(self):
         """Initialize Haar Cascade for cat detection"""
         try:
-            # Try to load cat face cascade (you might need to download this)
-            cat_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalcatface.xml'
+            # Try multiple cascade file locations
+            cascade_paths = [
+                'haarcascade_frontalcatface.xml',  # Local file
+                'haarcascade_frontalcatface_extended.xml',  # Alternative
+                '/usr/share/opencv4/haarcascades/haarcascade_frontalcatface.xml',  # System path
+            ]
             
-            if os.path.exists(cat_cascade_path):
-                self.cat_cascade = cv2.CascadeClassifier(cat_cascade_path)
-                self.logger.info("Loaded cat face Haar cascade")
-            else:
-                # Fallback to general object detection or download instructions
-                self.logger.warning("Cat cascade not found. You may need to download it.")
-                self.logger.info("Download from: https://github.com/opencv/opencv/tree/master/data/haarcascades")
-                # Use a general approach as fallback
+            # Try to get OpenCV data path (newer versions)
+            try:
+                opencv_data_path = cv2.__file__.replace('cv2.cpython-311-aarch64-linux-gnu.so', 'data/')
+                cascade_paths.append(opencv_data_path + 'haarcascade_frontalcatface.xml')
+            except:
+                pass
+            
+            self.cat_cascade = None
+            for path in cascade_paths:
+                if os.path.exists(path):
+                    self.cat_cascade = cv2.CascadeClassifier(path)
+                    if not self.cat_cascade.empty():
+                        self.logger.info(f"Loaded cat face Haar cascade from: {path}")
+                        return
+            
+            # If no cat cascade found, use basic color detection
+            if self.cat_cascade is None or self.cat_cascade.empty():
+                self.logger.warning("Cat cascade not found. Using basic color detection.")
+                self.logger.info("To download cat cascade: wget https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades_cuda/haarcascade_frontalcatface.xml")
                 self.cat_cascade = None
             
         except Exception as e:
@@ -225,39 +240,91 @@ class CatROIDetector:
         return detections
     
     def detect_cats_haar(self, frame):
-        """Detect cats using Haar Cascade"""
-        if self.cat_cascade is None:
-            return []
+        """Detect cats using Haar Cascade or color-based detection"""
+        if self.cat_cascade is not None:
+            # Use Haar cascade
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            cats = self.cat_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30)
+            )
+            
+            detections = []
+            for (x, y, w, h) in cats:
+                # Expand bounding box to include more of the cat's body
+                expanded_h = int(h * 2.5)
+                expanded_w = int(w * 1.5)
+                expanded_x = max(0, x - int((expanded_w - w) / 2))
+                expanded_y = max(0, y - int((expanded_h - h) / 4))
+                
+                # Ensure we don't go outside frame boundaries
+                expanded_w = min(expanded_w, frame.shape[1] - expanded_x)
+                expanded_h = min(expanded_h, frame.shape[0] - expanded_y)
+                
+                detections.append({
+                    'bbox': (expanded_x, expanded_y, expanded_w, expanded_h),
+                    'confidence': 0.8,
+                    'method': 'Haar'
+                })
+            
+            return detections
+        else:
+            # Fallback to basic color-based detection
+            return self.detect_cats_color_based(frame)
+    
+    def detect_cats_color_based(self, frame):
+        """Basic color-based cat detection as fallback"""
+        self.logger.info("Using basic color-based detection")
         
-        # Convert to grayscale for Haar cascade
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Detect cat faces
-        cats = self.cat_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
+        # Define color ranges for common cat fur colors
+        color_ranges = [
+            # Orange/ginger cats
+            ([10, 100, 100], [25, 255, 255]),
+            # Gray cats
+            ([0, 0, 50], [180, 30, 200]),
+            # Brown/tan cats
+            ([8, 50, 50], [25, 255, 255]),
+            # Black cats (low saturation, low value)
+            ([0, 0, 0], [180, 255, 80]),
+            # White cats (high value, low saturation)
+            ([0, 0, 200], [180, 30, 255]),
+        ]
+        
+        combined_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        
+        for lower, upper in color_ranges:
+            lower = np.array(lower)
+            upper = np.array(upper)
+            mask = cv2.inRange(hsv, lower, upper)
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+        
+        # Apply morphological operations to clean up the mask
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         detections = []
-        for (x, y, w, h) in cats:
-            # Expand bounding box to include more of the cat's body
-            # This is an estimation since Haar cascade typically detects faces
-            expanded_h = int(h * 2.5)  # Assume body is ~2.5x the face height
-            expanded_w = int(w * 1.5)   # Expand width slightly
-            expanded_x = max(0, x - int((expanded_w - w) / 2))
-            expanded_y = max(0, y - int((expanded_h - h) / 4))  # Keep face in upper portion
-            
-            # Ensure we don't go outside frame boundaries
-            expanded_w = min(expanded_w, frame.shape[1] - expanded_x)
-            expanded_h = min(expanded_h, frame.shape[0] - expanded_y)
-            
-            detections.append({
-                'bbox': (expanded_x, expanded_y, expanded_w, expanded_h),
-                'confidence': 0.8,  # Fixed confidence for Haar cascade
-                'method': 'Haar'
-            })
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > 2000:  # Filter small detections
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # Filter based on aspect ratio (cats are typically not too tall/thin)
+                aspect_ratio = w / float(h)
+                if 0.3 < aspect_ratio < 3.0:  # Reasonable aspect ratio for cats
+                    detections.append({
+                        'bbox': (x, y, w, h),
+                        'confidence': 0.6,  # Lower confidence for basic detection
+                        'method': 'Color'
+                    })
         
         return detections
     
@@ -335,7 +402,9 @@ class CatROIDetector:
     def run_realtime_detection(self, show_video=True, save_detections=False, print_coords=True):
         """Run real-time cat detection"""
         print(f"\nStarting real-time cat detection using {self.detection_method.upper()} method...")
-        print("Press 'q' to quit, 's' to save current detections")
+        print("Press Ctrl+C to quit")
+        if save_detections:
+            print("Press 's' to save current detections")
         
         frame_count = 0
         fps_start_time = time.time()
@@ -354,36 +423,53 @@ class CatROIDetector:
                 if print_coords and detections:
                     self.print_roi_coordinates(detections)
                 
-                # Draw detections on frame
+                # Only show video if display is available and requested
                 if show_video:
-                    display_frame = self.draw_detections(frame, detections)
-                    
-                    # Calculate and display FPS
-                    frame_count += 1
-                    if frame_count % 30 == 0:  # Update FPS every 30 frames
-                        fps = 30 / (time.time() - fps_start_time)
-                        fps_start_time = time.time()
-                    else:
-                        fps = 0
-                    
-                    if fps > 0:
-                        cv2.putText(display_frame, f"FPS: {fps:.1f}", (10, 30), 
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    
-                    # Show frame
-                    cv2.imshow("Cat ROI Detection", display_frame)
+                    try:
+                        display_frame = self.draw_detections(frame, detections)
+                        
+                        # Calculate and display FPS
+                        frame_count += 1
+                        if frame_count % 30 == 0:  # Update FPS every 30 frames
+                            fps = 30 / (time.time() - fps_start_time)
+                            fps_start_time = time.time()
+                        else:
+                            fps = 0
+                        
+                        if fps > 0:
+                            cv2.putText(display_frame, f"FPS: {fps:.1f}", (10, 30), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        
+                        # Show frame
+                        cv2.imshow("Cat ROI Detection", display_frame)
+                        
+                        # Handle key presses
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord('q'):
+                            break
+                        elif key == ord('s') and save_detections and detections:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            saved = self.save_roi_image(frame, detections, timestamp)
+                            print(f"Saved {saved} ROI image(s)")
+                            
+                    except cv2.error as e:
+                        # Display not available, run headless
+                        print("Display not available. Running in headless mode...")
+                        show_video = False
+                        if save_detections and detections:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            saved = self.save_roi_image(frame, detections, timestamp)
+                            print(f"Saved {saved} ROI image(s)")
                 
-                # Handle key presses
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord('s') and save_detections and detections:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    saved = self.save_roi_image(frame, detections, timestamp)
-                    print(f"Saved {saved} ROI image(s)")
+                else:
+                    # Headless mode - just save if requested
+                    if save_detections and detections:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        saved = self.save_roi_image(frame, detections, timestamp)
+                        print(f"Saved {saved} ROI image(s)")
                 
                 # Small delay to prevent excessive CPU usage
-                time.sleep(0.01)
+                time.sleep(0.1)
                 
         except KeyboardInterrupt:
             print("\nStopping detection...")
