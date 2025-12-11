@@ -22,7 +22,28 @@ def read_input_file(type: str, date_key: str) -> str:
         data = input_file.read()
     return data    
 
+from collections import deque
 
+def bfs_shortest_path(grid, start, goal):
+    rows, cols = len(grid), len(grid[0])
+    queue = deque([(start, [start])])  # (position, path)
+    visited = {start}
+    
+    while queue:
+        (r, c), path = queue.popleft()
+        
+        if (r, c) == goal:
+            return path
+        
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # 4-connected
+            nr, nc = r + dr, c + dc
+            if (0 <= nr < rows and 0 <= nc < cols 
+                and (nr, nc) not in visited 
+                and grid[nr][nc] != '#'):  # assuming '#' is wall
+                visited.add((nr, nc))
+                queue.append(((nr, nc), path + [(nr, nc)]))
+    
+    return None  # no path exists
 
 
 def get_int_list(data: list) -> list:
