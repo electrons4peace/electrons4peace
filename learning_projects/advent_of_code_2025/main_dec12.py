@@ -2,7 +2,7 @@ import utils.common_utils as common_utils
 import re
 import pulp
 import numpy as np
-from pprint import pprint
+from scipy.sparse import lil_matrix, csr_matrix
 
 """
 There are a few Elves here frantically decorating before the deadline. They think they'll be able to finish most of the work, but the one thing they're worried about is the presents for all the young Elves that live here at the North Pole. It's an ancient tradition to put the presents under the trees, but the Elves are worried they won't fit.
@@ -235,10 +235,10 @@ def get_all_placements(shape: np.ndarray, grid_size: tuple[int,int]) -> list[lis
     return placements
 
 
-def get_A_matrix(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quantities: tuple[int]) -> np.ndarray:
+def get_A_matrix(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quantities: tuple[int], use_sparse: bool = True):
     """Build the constraint matrix A for the linear programming problem.
 
-    Each column represents one possible placement of one shape instance.
+    Each column represents one possible placement of one shape TYPE (not instance).
     Each row represents one cell in the grid.
     A[i,j] = 1 if placement j uses cell i, 0 otherwise.
 
@@ -246,14 +246,18 @@ def get_A_matrix(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quan
         shapes_list: List of lists, where shapes_list[i] contains all rotations of shape i
         size: (width, height) of the grid
         quantities: Tuple of how many of each shape type we need
+        use_sparse: If True, return a scipy sparse matrix (much more memory efficient)
 
     Returns:
-        A matrix (grid_cells x total_placements)
+        A tuple of:
+        - A matrix (grid_cells x total_placement_options) - sparse or dense
+        - shape_indices: List mapping column index to shape type index
     """
     width, height = size
     total_cells = width * height
 
-    all_placements = []  # List of all possible placements across all shapes
+    all_placements = []  # List of all possible placements
+    shape_indices = []   # Track which shape type each column corresponds to
 
     # For each shape type
     for shape_idx, shape_rotations in enumerate(shapes_list):
@@ -263,69 +267,260 @@ def get_A_matrix(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quan
         if quantity == 0:
             continue
 
-        # For each instance we need of this shape
-        for instance in range(quantity):
-            # For each rotation of this shape
-            for rotation in shape_rotations:
-                # Get all valid placements of this rotation
-                placements = get_all_placements(rotation, size)
+        # For each rotation of this shape
+        for rotation in shape_rotations:
+            # Get all valid placements of this rotation
+            placements = get_all_placements(rotation, size)
 
-                # Add each placement as a column in our matrix
-                for placement in placements:
-                    # Convert to vector indices
-                    vector_indices = map_matrix_position_to_vector_position(placement, size)
-                    all_placements.append(vector_indices)
+            # Add each placement as a column in our matrix
+            for placement in placements:
+                # Convert to vector indices
+                vector_indices = map_matrix_position_to_vector_position(placement, size)
+                all_placements.append(vector_indices)
+                shape_indices.append(shape_idx)  # Track which shape this column represents
 
     # Build the matrix
     num_columns = len(all_placements)
-    A = np.zeros((total_cells, num_columns), dtype=int)
 
-    for col_idx, placement in enumerate(all_placements):
-        for cell_idx in placement:
-            A[cell_idx, col_idx] = 1
+    if use_sparse:
+        # Use LIL (List of Lists) format for efficient construction
+        A = lil_matrix((total_cells, num_columns), dtype=np.int8)
 
-    return A
+        for col_idx, placement in enumerate(all_placements):
+            for cell_idx in placement:
+                A[cell_idx, col_idx] = 1
 
+        # Convert to CSR (Compressed Sparse Row) for efficient arithmetic operations
+        A = csr_matrix(A)
+    else:
+        # Dense matrix (original implementation)
+        A = np.zeros((total_cells, num_columns), dtype=int)
+
+        for col_idx, placement in enumerate(all_placements):
+            for cell_idx in placement:
+                A[cell_idx, col_idx] = 1
+
+    return A, shape_indices
+
+
+def solve_placement_problem(A, shape_indices: list[int], quantities: tuple[int], size: tuple[int,int]) -> dict:
+    """Solve the shape placement problem using linear programming.
+
+    Args:
+        A: Constraint matrix where A[i,j] = 1 if placement j uses cell i (can be sparse or dense)
+        shape_indices: List mapping column index to shape type index
+        quantities: Tuple of required quantities for each shape type
+        size: (width, height) of the grid
+
+    Returns:
+        Dictionary with:
+        - 'feasible': bool indicating if solution exists
+        - 'solution': list of selected placement indices (if feasible)
+        - 'grid': 2D array showing the solution (if feasible)
+    """
+    from scipy.sparse import issparse
+
+    width, height = size
+    num_placements = A.shape[1]
+    num_cells = A.shape[0]
+
+    # Create the LP problem
+    prob = pulp.LpProblem("Shape_Placement", pulp.LpMinimize)
+
+    # Create binary decision variables (x[i] = 1 if we use placement i)
+    x = [pulp.LpVariable(f"x_{i}", cat='Binary') for i in range(num_placements)]
+
+    # Objective: We just want feasibility, so use a dummy objective
+    prob += 0
+
+    # Constraint 1: Each cell can be occupied by at most one placement (A @ x <= 1)
+    if issparse(A):
+        # For sparse matrices, iterate over non-zero elements more efficiently
+        A_csr = csr_matrix(A)  # Ensure CSR format for efficient row slicing
+        for cell_idx in range(num_cells):
+            # Get non-zero column indices for this row
+            row = A_csr.getrow(cell_idx)
+            nonzero_cols = row.nonzero()[1]
+            if len(nonzero_cols) > 0:
+                prob += pulp.lpSum(x[j] for j in nonzero_cols) <= 1, f"Cell_{cell_idx}"
+    else:
+        # Dense matrix version
+        for cell_idx in range(num_cells):
+            prob += pulp.lpSum(A[cell_idx, j] * x[j] for j in range(num_placements)) <= 1, f"Cell_{cell_idx}"
+
+    # Constraint 2: Must use exactly the required quantity of each shape type
+    num_shape_types = len(quantities)
+    for shape_idx in range(num_shape_types):
+        if quantities[shape_idx] == 0:
+            continue
+
+        # Find all placement columns for this shape type
+        cols_for_shape = [j for j, s_idx in enumerate(shape_indices) if s_idx == shape_idx]
+
+        if cols_for_shape:
+            prob += pulp.lpSum(x[j] for j in cols_for_shape) == quantities[shape_idx], f"Shape_{shape_idx}_quantity"
+
+    # Solve the problem
+    prob.solve(pulp.PULP_CBC_CMD(msg=0))  # msg=0 suppresses solver output
+
+    # Check if solution is feasible
+    is_feasible = prob.status == pulp.LpStatusOptimal
+
+    result = {
+        'feasible': is_feasible,
+        'solution': None,
+        'grid': None
+    }
+
+    if is_feasible:
+        # Extract which placements were selected
+        selected_placements = [i for i in range(num_placements) if pulp.value(x[i]) == 1]
+        result['solution'] = selected_placements
+
+        # Build a visual grid showing the solution
+        grid = np.full((height, width), -1, dtype=int)  # -1 means empty
+
+        for placement_idx in selected_placements:
+            shape_type = shape_indices[placement_idx]
+
+            # Get the cells occupied by this placement
+            if issparse(A):
+                # For sparse matrix, get non-zero row indices
+                col = A.getcol(placement_idx)
+                cells = col.nonzero()[0]
+            else:
+                # Dense matrix version
+                cells = [cell_idx for cell_idx in range(num_cells) if A[cell_idx, placement_idx] == 1]
+
+            # Mark these cells with the shape type
+            for cell_idx in cells:
+                row = cell_idx // width
+                col = cell_idx % width
+                grid[row, col] = shape_type
+
+        result['grid'] = grid
+
+    return result
+
+
+def visualize_solution(grid: np.ndarray) -> str:
+    """Convert a solution grid to a visual string representation.
+
+    Args:
+        grid: 2D array where each cell contains shape type index or -1 for empty
+
+    Returns:
+        String representation using letters A-Z for shapes, . for empty
+    """
+    height, width = grid.shape
+    lines = []
+
+    for row in range(height):
+        line = ""
+        for col in range(width):
+            value = grid[row, col]
+            if value == -1:
+                line += "."
+            else:
+                # Use letters A-Z for shape types
+                line += chr(ord('A') + value)
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def solve_region(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quantities: tuple[int], use_sparse: bool = True) -> bool:
+    """Solve a single region placement problem.
+
+    Args:
+        shapes_list: List of lists, where shapes_list[i] contains all rotations of shape i
+        size: (width, height) of the grid
+        quantities: Tuple of required quantities for each shape type
+        use_sparse: If True, use sparse matrices for better memory efficiency
+
+    Returns:
+        True if the region can fit all required shapes, False otherwise
+    """
+    from scipy.sparse import issparse
+
+    # Build the A matrix
+    A, shape_indices = get_A_matrix(shapes_list, size, quantities, use_sparse=use_sparse)
+
+    print(f"\nSolving region {size[0]}x{size[1]} with {quantities}")
+    print(f"A matrix shape: {A.shape} (cells x placements)")
+
+    # Show memory efficiency of sparse matrix
+    if issparse(A):
+        nnz = A.nnz
+        total_elements = A.shape[0] * A.shape[1]
+        sparsity = 100 * (1 - nnz / total_elements)
+        print(f"Sparse matrix: {nnz:,} non-zeros out of {total_elements:,} ({sparsity:.1f}% sparse)")
+        # Memory estimate
+        dense_bytes = total_elements * 4  # 4 bytes per int32
+        sparse_bytes = nnz * 12  # Roughly 12 bytes per non-zero (data + indices)
+        print(f"Memory: ~{sparse_bytes/1024:.1f}KB (sparse) vs ~{dense_bytes/1024:.1f}KB (dense) - {100*sparse_bytes/dense_bytes:.1f}% of dense")
+    else:
+        print("Using dense matrix")
+
+    # Solve the problem
+    result = solve_placement_problem(A, shape_indices, quantities, size)
+
+    if result['feasible']:
+        print("✓ FEASIBLE - Solution found!")
+        print("\nSolution grid:")
+        print(visualize_solution(result['grid']))
+        print(f"\nUsed {len(result['solution'])} placements: {result['solution']}")
+        return True
+    else:
+        print("✗ INFEASIBLE - No solution exists")
+        return False
 
 
 def playground(data: list[str]):
+    """Test the solver with example data."""
     shapes = get_shapes_list(data)
-    coords = get_coords_list(data)
-    matrix = get_matrix_from_shape(shapes[0])
-    print(matrix)
-    rotations = get_all_shape_rotations(matrix)
-    for rotation in rotations:
-        pprint(rotation.tolist())
+    coords, size_list = get_coords_list(data)
+
+    # Get all shape rotations
+    all_shape_rotations = []
+    for i, shape in enumerate(shapes):
+        matrix = get_matrix_from_shape(shape)
+        rotations = get_all_shape_rotations(matrix)
+        all_shape_rotations.append(rotations)
+        print(f"\nShape {i} has {len(rotations)} unique rotations")
+
+    # Test each region
+    print("\n" + "="*60)
+    print("TESTING REGIONS")
+    print("="*60)
+
+    feasible_count = 0
+    for i, (quantities, size) in enumerate(zip(coords, size_list)):
+        print(f"\n{'='*60}")
+        print(f"Region {i+1}")
+        print(f"{'='*60}")
+
+        is_feasible = solve_region(all_shape_rotations, size, quantities)
+        if is_feasible:
+            feasible_count += 1
+
+    print(f"\n{'='*60}")
+    print(f"SUMMARY: {feasible_count}/{len(coords)} regions are feasible")
+    print(f"{'='*60}")
     
 
 
 def runa(type_mode: str, date: str) -> None:
-    """Entry point for running the solution for the given date.
-
-    For now this just loads the input data and reports how many lines
-    were loaded so you can plug in puzzle-specific logic later.
-    """
+    """Solve the Advent of Code Day 12 problem."""
     data = get_data(type_mode, date)
-    shapes = get_shapes_list(data)
-    coords, size_list = get_coords_list(data)
-    print(f"Loaded {len(shapes)} shapes and {len(coords)} coordinate sets.")
-    for i, shape in enumerate(shapes):
-        print(f"Shape {i}:")
-        for row in shape:
-            print(row)
-    for i, coord in enumerate(coords):
-        print(f"Coord set {i}: {coord}, Size: {size_list[i]}")
     playground(data)
-#    print(shapes)
-#    print(coords)
-#    print(size_list)
 
 
 
 
 if __name__ == "__main__":
     date = "dec12"
-    type_mode = "test"
-    #type_mode = "data"
+    #type_mode = "test"
+    type_mode = "data"
     runa(type_mode, date)
     #runb(type_mode, date)
