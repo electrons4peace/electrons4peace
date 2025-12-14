@@ -382,5 +382,5 @@ if __name__ == "__main__":
     date = "dec09"
     #type_mode = "test"
     type_mode = "data"
-    #runa(type_mode, date)
-    runb(type_mode, date)
+    runa(type_mode, date)
+    #runb(type_mode, date)
