@@ -235,6 +235,40 @@ def get_all_placements(shape: np.ndarray, grid_size: tuple[int,int]) -> list[lis
     return placements
 
 
+def quick_feasibility_check(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quantities: tuple[int]) -> bool:
+    """Quick check if problem is obviously infeasible based on total area.
+
+    Args:
+        shapes_list: List of lists, where shapes_list[i] contains all rotations of shape i
+        size: (width, height) of the grid
+        quantities: Tuple of required quantities for each shape type
+
+    Returns:
+        True if problem might be feasible, False if obviously infeasible
+    """
+    width, height = size
+    total_grid_area = width * height
+
+    # Calculate total area needed by all shapes
+    total_shapes_area = 0
+    for shape_idx, shape_rotations in enumerate(shapes_list):
+        quantity = quantities[shape_idx]
+        if quantity == 0:
+            continue
+
+        # Use the first rotation to calculate the shape's area (all rotations have same area)
+        if shape_rotations:
+            shape = shape_rotations[0]
+            shape_area = np.sum(shape)  # Count the number of 1s
+            total_shapes_area += shape_area * quantity
+
+    # If total shapes area exceeds grid area, it's infeasible
+    if total_shapes_area > total_grid_area:
+        return False
+
+    return True
+
+
 def get_A_matrix(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quantities: tuple[int], use_sparse: bool = True):
     """Build the constraint matrix A for the linear programming problem.
 
@@ -443,10 +477,24 @@ def solve_region(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quan
     """
     from scipy.sparse import issparse
 
+    print(f"\nSolving region {size[0]}x{size[1]} with {quantities}")
+
+    # Quick feasibility check based on total area
+    if not quick_feasibility_check(shapes_list, size, quantities):
+        # Calculate actual areas for reporting
+        width, height = size
+        total_grid_area = width * height
+        total_shapes_area = sum(
+            np.sum(shape_rotations[0]) * quantities[shape_idx]
+            for shape_idx, shape_rotations in enumerate(shapes_list)
+            if quantities[shape_idx] > 0 and shape_rotations
+        )
+        print(f"✗ INFEASIBLE - Area check failed: need {total_shapes_area} cells, have {total_grid_area} cells")
+        return False
+
     # Build the A matrix
     A, shape_indices = get_A_matrix(shapes_list, size, quantities, use_sparse=use_sparse)
 
-    print(f"\nSolving region {size[0]}x{size[1]} with {quantities}")
     print(f"A matrix shape: {A.shape} (cells x placements)")
 
     # Show memory efficiency of sparse matrix
@@ -467,9 +515,9 @@ def solve_region(shapes_list: list[list[np.ndarray]], size: tuple[int,int], quan
 
     if result['feasible']:
         print("✓ FEASIBLE - Solution found!")
-        print("\nSolution grid:")
-        print(visualize_solution(result['grid']))
-        print(f"\nUsed {len(result['solution'])} placements: {result['solution']}")
+        #print("\nSolution grid:")
+        #print(visualize_solution(result['grid']))
+        #print(f"\nUsed {len(result['solution'])} placements: {result['solution']}")
         return True
     else:
         print("✗ INFEASIBLE - No solution exists")
